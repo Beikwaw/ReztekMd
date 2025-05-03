@@ -51,11 +51,6 @@ export default function AdminHeader({ adminData, onLogout }: AdminHeaderProps) {
               Feedback
             </Button>
           </Link>
-          <Link href="/admin/analytics">
-            <Button variant="ghost" className="text-sm h-9">
-              Analytics
-            </Button>
-          </Link>
           <Link href="/admin/stock">
             <Button variant="ghost" className="text-sm h-9">
               Stock

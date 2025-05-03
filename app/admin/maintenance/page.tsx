@@ -23,9 +23,12 @@ import {
 } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Search, Phone, Mail, Clock, AlertTriangle, CheckCircle, Star } from "lucide-react"
+import { Search, Phone, Mail, Clock, AlertTriangle, CheckCircle, Star, FileText, Loader2 } from "lucide-react"
 import AdminHeader from "@/components/admin/admin-header"
 import Image from "next/image"
+import jsPDF from "jspdf"
+import autoTable from 'jspdf-autotable'
+import { format } from 'date-fns'
 
 interface MaintenanceRequest {
   id: string
@@ -61,6 +64,7 @@ export default function AdminMaintenance() {
   const [updatingStatus, setUpdatingStatus] = useState(false)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [imageLoading, setImageLoading] = useState(false)
+  const [exportingPdf, setExportingPdf] = useState(false)
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -431,6 +435,185 @@ export default function AdminMaintenance() {
     }
   }
 
+  const exportToPDF = async () => {
+    try {
+      if (filteredRequests.length === 0) {
+        alert("No maintenance requests to export.")
+        return
+      }
+      
+      setExportingPdf(true)
+      
+      // Create PDF document with orientation detection for better mobile viewing
+      // Use portrait for fewer columns, landscape for more columns
+      const orientation = filteredRequests[0] && Object.keys(filteredRequests[0]).length > 5 ? 'landscape' : 'portrait'
+      const doc = new jsPDF({
+        orientation: orientation,
+        unit: 'mm',
+        format: 'a4',
+      })
+      
+      // Get page dimensions
+      const pageWidth = doc.internal.pageSize.getWidth()
+      const pageHeight = doc.internal.pageSize.getHeight()
+      
+      // Add header
+      doc.setFontSize(16) // Slightly smaller font for better mobile display
+      doc.text(`My Domain ${activeTab} - Maintenance Requests Report`, 14, 20)
+      doc.setFontSize(10) // Smaller subheading
+      doc.text(`Generated on ${format(new Date(), "dd MMM yyyy")}`, 14, 28)
+      
+      // Format data for table - optimize for mobile viewing
+      const tableData = filteredRequests.map(request => {
+        // Format dates
+        let submittedDate = "N/A"
+        let updatedDate = "N/A"
+        
+        try {
+          if (request.submittedAt) {
+            submittedDate = format(new Date(request.submittedAt), "dd/MM/yy") // Shorter date format for mobile
+          }
+          
+          if (request.lastUpdatedAt) {
+            updatedDate = format(new Date(request.lastUpdatedAt), "dd/MM/yy") // Shorter date format for mobile
+          }
+        } catch (e) {
+          console.error("Date formatting error:", e)
+        }
+        
+        // Truncate long text for better mobile display
+        const truncateText = (text: string | undefined, maxLength: number) => {
+          if (!text) return "N/A"
+          return text.length > maxLength ? text.substring(0, maxLength) + "..." : text
+        }
+        
+        return [
+          truncateText(request.id, 8), // Shorter ID for mobile
+          truncateText(request.tenantName, 15),
+          truncateText(request.roomNumber, 8),
+          truncateText(request.issueLocation, 10),
+          truncateText(request.urgencyLevel, 8),
+          truncateText(request.status, 10),
+          submittedDate,
+          updatedDate
+        ]
+      })
+      
+      // Calculate optimal column widths based on device
+      const calculateColumnWidths = () => {
+        const totalWidth = pageWidth - 20 // Margins
+        
+        // Responsive column widths - percentages of total width
+        return {
+          0: { cellWidth: totalWidth * 0.12 },  // Request ID
+          1: { cellWidth: totalWidth * 0.15 },  // Tenant
+          2: { cellWidth: totalWidth * 0.10 },  // Room Number
+          3: { cellWidth: totalWidth * 0.12 },  // Location
+          4: { cellWidth: totalWidth * 0.10 },  // Urgency
+          5: { cellWidth: totalWidth * 0.12 },  // Status
+          6: { cellWidth: totalWidth * 0.12 },  // Submitted
+          7: { cellWidth: totalWidth * 0.12 }   // Last Updated
+        }
+      }
+      
+      // Add table with responsive settings
+      autoTable(doc, {
+        startY: 35,
+        head: [["ID", "Tenant", "Room", "Location", "Urgency", "Status", "Submitted", "Updated"]], // Shorter headers for mobile
+        body: tableData,
+        theme: "grid",
+        headStyles: { 
+          fillColor: [225, 29, 72],
+          fontSize: 8, // Smaller header font for mobile
+          cellPadding: 2 // Less padding for mobile
+        },
+        styles: { 
+          overflow: 'linebreak', 
+          cellWidth: 'wrap',
+          cellPadding: 2, // Less padding for mobile
+          fontSize: 7, // Smaller font for mobile
+          lineWidth: 0.1, // Thinner lines for mobile
+          halign: 'left' // Left alignment for better readability on small screens
+        },
+        columnStyles: calculateColumnWidths(),
+        didDrawPage: (data) => {
+          // This function runs on each page creation
+          // We'll use it to add the footer and logo to each page
+        }
+      })
+      
+      // Add footer to each page
+      const pageCount = (doc as any).internal.pages.length - 1
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i)
+        
+        // Add logo at the center bottom above "Kind regards"
+        try {
+          const logoImg = document.createElement('img')
+          logoImg.src = '/reztek-logo.png'
+          
+          // Wait for the image to load
+          await new Promise((resolve, reject) => {
+            logoImg.onload = resolve
+            logoImg.onerror = reject
+          })
+          
+          // Add logo to PDF (positioned at center bottom)
+          const imgWidth = 30 // Slightly smaller for mobile
+          const imgHeight = (logoImg.height * imgWidth) / logoImg.width
+          const centerX = pageWidth / 2 - imgWidth / 2
+          const logoY = pageHeight - 40 // Position above "Kind regards"
+          doc.addImage(logoImg.src, 'PNG', centerX, logoY, imgWidth, imgHeight)
+        } catch (error) {
+          console.error("Error adding logo to PDF:", error)
+          // Continue without logo if there's an error
+        }
+        
+        // Add "Kind regards, RezTek" message
+        doc.setFontSize(10)
+        doc.text("Kind regards,", 14, pageHeight - 25)
+        doc.setFont("helvetica", 'bold')
+        doc.text("RezTek", 14, pageHeight - 20)
+        doc.setFont("helvetica", 'normal')
+        
+        // Add footer text
+        doc.setFontSize(8)
+        doc.text("My Domain Student Living - Confidential", 14, pageHeight - 10)
+        doc.text(`Page ${i} of ${pageCount}`, pageWidth / 2, pageHeight - 10, { align: 'center' })
+        doc.text("Generated by RezTek", pageWidth - 60, pageHeight - 10)
+      }
+      
+      // Use blob for better cross-device compatibility
+      const pdfBlob = doc.output('blob')
+      const pdfUrl = URL.createObjectURL(pdfBlob)
+      
+      // Create a link and trigger download - works on mobile and desktop
+      const link = document.createElement('a')
+      link.href = pdfUrl
+      link.download = `my_domain_${activeTab.toLowerCase()}_maintenance_${format(new Date(), "yyyy-MM-dd")}.pdf`
+      
+      // Different approach for mobile vs desktop
+      if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+        // For mobile devices - open in new tab (most mobile browsers handle PDFs well)
+        window.open(pdfUrl, '_blank')
+      } else {
+        // For desktop - direct download
+        link.click()
+      }
+      
+      // Clean up
+      setTimeout(() => {
+        URL.revokeObjectURL(pdfUrl)
+      }, 100)
+      
+    } catch (error) {
+      console.error("Error generating PDF:", error)
+      alert("Failed to generate PDF. Please try again or contact support.")
+    } finally {
+      setExportingPdf(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
@@ -485,6 +668,24 @@ export default function AdminMaintenance() {
                   <SelectItem value="Cancelled">Cancelled</SelectItem>
                 </SelectContent>
               </Select>
+              <Button 
+                variant="outline" 
+                className="bg-gray-800 hover:bg-gray-700 border-gray-700"
+                onClick={exportToPDF}
+                disabled={exportingPdf || filteredRequests.length === 0}
+              >
+                {exportingPdf ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Exporting...
+                  </>
+                ) : (
+                  <>
+                    <FileText className="mr-2 h-4 w-4" />
+                    Download PDF
+                  </>
+                )}
+              </Button>
             </div>
           </div>
 
