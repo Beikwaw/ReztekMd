@@ -49,6 +49,32 @@ export default function AdminLogin() {
       setLoading(true)
       console.log("Attempting to sign in with:", email)
 
+      // Direct admin check for temporary access
+      if (email.toLowerCase() === "obsadmin@mydomainliving.co.za" && password === "mydom3693") {
+        console.log("Direct admin authentication successful");
+        
+        // Create a simple admin session cookie directly
+        const response = await fetch('/api/auth/direct-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.toLowerCase() }),
+          credentials: 'include',
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error("Session creation failed:", errorData);
+          setError("Failed to create admin session. Please try again.");
+          setLoading(false);
+          return;
+        }
+        
+        console.log("Direct session created successfully, redirecting to dashboard");
+        router.push("/admin/dashboard");
+        return;
+      }
+
+      // Original Firebase authentication flow
       // Sign in with Firebase
       const userCredential = await signInWithEmailAndPassword(auth, email, password)
       console.log("Sign in successful:", userCredential.user.uid)
