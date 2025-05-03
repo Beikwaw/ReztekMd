@@ -25,3 +25,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Firebase service account keys
+lib/serviceAccountKey.json
+**/serviceAccountKey.json
